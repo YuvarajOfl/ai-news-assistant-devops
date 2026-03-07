@@ -34,7 +34,7 @@ sentiment analysis, source credibility scoring, and persistent bookmarks.**
 | ⭐ **Persistent Bookmarks** | Save articles to SQLite — bookmarks survive page refreshes and restarts |
 | ⎘ **Share Button** | One-click copy article URL to clipboard |
 | 📄 **Pagination** | Navigate through pages of results — no 12-article cap |
-| 🌍 **Multi-language** | 10 languages: English, Hindi, French, German, Spanish, Portuguese, Italian, Japanese, Chinese, Arabic |
+| 🌍 **Multi-language** | 10 languages: English, Hindi, Tamil, German, Spanish, Portuguese, Italian, Japanese, Chinese, Arabic |
 | 🎨 **3 Themes** | Default, Light, Dark — switch instantly without reloading |
 | ⚡ **Quick Topics** | One-click pills: AI, Climate Change, Stock Market, Space, Cybersecurity, Startups |
 | ⚙️ **Advanced Filters** | Sort by Latest / Relevant / Popular, date range, articles per page |
