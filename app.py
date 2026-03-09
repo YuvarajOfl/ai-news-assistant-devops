@@ -410,39 +410,233 @@ def cred(source):
     return '<span class="cred-lo">? Unverified</span>'
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NEWS API
+# RATE LIMIT TRACKER  (persisted in session_state)
 # ─────────────────────────────────────────────────────────────────────────────
-def _api(url, params):
+if "api_limited"     not in st.session_state: st.session_state.api_limited     = False
+if "api_limit_until" not in st.session_state: st.session_state.api_limit_until = None
+
+def _mark_limited():
+    """Call when NewsAPI returns 429 or 401 exhausted — switches to RSS mode."""
+    st.session_state.api_limited     = True
+    st.session_state.api_limit_until = datetime.utcnow() + timedelta(hours=1)
+
+def _is_limited() -> bool:
+    if not st.session_state.api_limited: return False
+    if st.session_state.api_limit_until and datetime.utcnow() > st.session_state.api_limit_until:
+        st.session_state.api_limited     = False   # auto-reset after 1 hour
+        st.session_state.api_limit_until = None
+        return False
+    return True
+
+def _show_fallback_banner():
+    st.markdown(
+        '<div style="background:#FEF9C3;border:1px solid #FDE047;border-radius:8px;'
+        'padding:.55rem 1rem;font-size:.78rem;color:#854D0E;margin-bottom:.85rem">'
+        '⚠️ <b>NewsAPI limit reached</b> — showing results from free RSS feeds. '
+        'Resets automatically in ~1 hour.</div>',
+        unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RSS FEED SOURCES  (free, no key needed)
+# ─────────────────────────────────────────────────────────────────────────────
+RSS_FEEDS = {
+    "general":       ["http://feeds.bbci.co.uk/news/rss.xml",
+                      "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+                      "https://feeds.npr.org/1001/rss.xml"],
+    "technology":    ["http://feeds.bbci.co.uk/news/technology/rss.xml",
+                      "https://feeds.feedburner.com/TechCrunch",
+                      "https://www.wired.com/feed/rss",
+                      "https://feeds.arstechnica.com/arstechnica/index"],
+    "business":      ["http://feeds.bbci.co.uk/news/business/rss.xml",
+                      "https://feeds.bloomberg.com/markets/news.rss",
+                      "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"],
+    "science":       ["http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+                      "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
+                      "https://www.sciencedaily.com/rss/top.xml"],
+    "health":        ["http://feeds.bbci.co.uk/news/health/rss.xml",
+                      "https://rss.nytimes.com/services/xml/rss/nyt/Health.xml"],
+    "sports":        ["http://feeds.bbci.co.uk/sport/rss.xml",
+                      "https://rss.nytimes.com/services/xml/rss/nyt/Sports.xml"],
+    "entertainment": ["http://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
+                      "https://rss.nytimes.com/services/xml/rss/nyt/Arts.xml"],
+    "gaming":        ["https://www.ign.com/articles.rss",
+                      "https://kotaku.com/rss"],
+    "movies":        ["https://variety.com/v/film/feed/",
+                      "https://deadline.com/feed/"],
+}
+
+# Topic → RSS search via Google News RSS (no key)
+def _google_news_rss(query: str, lang: str = "en") -> str:
+    q = requests.utils.quote(query)
+    return f"https://news.google.com/rss/search?q={q}&hl={lang}&gl=US&ceid=US:{lang}"
+
+def _extract_image(item_xml: str, article_url: str) -> str:
+    """
+    Try 3 methods to find an image for an RSS item:
+      1. media:content or media:thumbnail (most feeds)
+      2. enclosure tag
+      3. <img> inside description HTML
+    Returns image URL string or "".
+    """
+    # 1. media:content / media:thumbnail
+    for pattern in [
+        r'<media:content[^>]+url=["\']([^"\']+)["\']',
+        r'<media:thumbnail[^>]+url=["\']([^"\']+)["\']',
+        r'<media:content[^>]+url=([^\s>]+)',
+    ]:
+        m = re.search(pattern, item_xml, re.IGNORECASE)
+        if m:
+            url = m.group(1).strip().strip('"\'')
+            if url.startswith("http"): return url
+
+    # 2. enclosure tag (url attribute)
+    m = re.search(r'<enclosure[^>]+url=["\']([^"\']+)["\']', item_xml, re.IGNORECASE)
+    if m:
+        url = m.group(1).strip()
+        if url.startswith("http") and any(ext in url.lower() for ext in (".jpg",".jpeg",".png",".webp",".gif")):
+            return url
+
+    # 3. <img src="..."> inside description CDATA
+    m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', item_xml, re.IGNORECASE)
+    if m:
+        url = m.group(1).strip()
+        if url.startswith("http"): return url
+
+    return ""
+
+def _parse_rss(url: str, limit: int = 10) -> list:
+    """Fetch and parse an RSS feed. Returns list of article dicts."""
     try:
-        r = requests.get(url, params={**params,"apiKey":NEWS_API_KEY}, timeout=10)
-        r.raise_for_status(); return r.json()
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; NewsAssistant/1.0)"}
+        r = requests.get(url, headers=headers, timeout=8)
+        if r.status_code != 200: return []
+        xml = r.text
+
+        articles = []
+        items = re.findall(r"<item>(.*?)</item>", xml, re.DOTALL)
+        for item in items[:limit]:
+            def tag(t):
+                m = re.search(rf"<{t}[^>]*><!\[CDATA\[(.*?)\]\]></{t}>", item, re.DOTALL)
+                if m: return m.group(1).strip()
+                m = re.search(rf"<{t}[^>]*>(.*?)</{t}>", item, re.DOTALL)
+                return m.group(1).strip() if m else ""
+
+            title = tag("title")
+            link  = tag("link") or tag("guid")
+            desc  = re.sub(r"<[^>]+>", "", tag("description"))
+            pub   = tag("pubDate")
+            src_m = re.search(r"<source[^>]*>(.*?)</source>", item, re.DOTALL)
+            src   = src_m.group(1).strip() if src_m else (
+                    re.search(r"https?://(?:www\.)?([^/]+)", link or "").group(1)
+                    if link else "RSS Feed")
+
+            # ── Image extraction (3 methods) ──
+            img = _extract_image(item, link or "")
+
+            # Parse pubDate → ISO
+            iso = ""
+            for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S GMT"):
+                try: iso = datetime.strptime(pub.strip(), fmt).isoformat(); break
+                except: pass
+
+            if title and link:
+                articles.append({
+                    "title":       title,
+                    "description": desc[:400] if desc else "",
+                    "url":         link,
+                    "urlToImage":  img,
+                    "publishedAt": iso,
+                    "source":      {"name": src},
+                    "content":     desc,
+                })
+        return articles
+    except Exception:
+        return []
+
+def _rss_for_query(query: str, lang: str, limit: int) -> list:
+    """Use Google News RSS to search by query — unlimited, no key."""
+    return _parse_rss(_google_news_rss(query, lang), limit=limit)
+
+def _rss_for_category(category: str, limit: int) -> list:
+    """Pull from curated RSS feeds for a category."""
+    feeds = RSS_FEEDS.get(category, RSS_FEEDS["general"])
+    articles, seen = [], set()
+    for feed_url in feeds:
+        for art in _parse_rss(feed_url, limit=limit):
+            if art["url"] not in seen:
+                seen.add(art["url"])
+                articles.append(art)
+        if len(articles) >= limit: break
+    return articles[:limit]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NEWS API  (with rate-limit detection + RSS fallback)
+# ─────────────────────────────────────────────────────────────────────────────
+def _api(url, params) -> tuple:
+    """Returns (data_or_None, hit_limit: bool)."""
+    try:
+        r = requests.get(url, params={**params, "apiKey": NEWS_API_KEY}, timeout=10)
+        if r.status_code in (429, 426):          # rate limited
+            return None, True
+        if r.status_code == 401:
+            body = r.json()
+            if "rateLimited" in body.get("code","") or "maximumResultsReached" in body.get("code",""):
+                return None, True
+            return None, False
+        r.raise_for_status()
+        return r.json(), False
     except requests.HTTPError:
-        st.error(f"NewsAPI {r.status_code}: {r.json().get('message','Error')}")
-    except requests.ConnectionError: st.error("Network error.")
-    except requests.Timeout:         st.error("Request timed out.")
-    except Exception as e:           st.error(f"Error: {e}")
-    return None
+        return None, False
+    except requests.ConnectionError:
+        return None, False
+    except requests.Timeout:
+        return None, False
+    except Exception:
+        return None, False
 
 def _clean(arts):
-    return [a for a in arts if a.get("title") and a["title"]!="[Removed]"
-            and (a.get("source") or {}).get("name")!="[Removed]" and a.get("url")]
+    return [a for a in arts
+            if a.get("title") and a["title"] != "[Removed]"
+            and (a.get("source") or {}).get("name") != "[Removed]"
+            and a.get("url")]
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def fetch_everything(query, sort_by, page_size, days_back, language="en", page=1):
-    fd = (datetime.utcnow()-timedelta(days=days_back)).strftime("%Y-%m-%d")
-    d  = _api(EVERYTHING_EP,{"q":query,"language":language,"sortBy":sort_by,
-              "pageSize":page_size,"from":fd,"page":page})
-    return _clean(d.get("articles",[])) if d else []
+    # Try NewsAPI first (unless already known-limited)
+    if not _is_limited():
+        fd = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        data, limited = _api(EVERYTHING_EP, {
+            "q": query, "language": language, "sortBy": sort_by,
+            "pageSize": page_size, "from": fd, "page": page,
+        })
+        if limited:
+            _mark_limited()
+        elif data:
+            arts = _clean(data.get("articles", []))
+            if arts: return arts
+
+    # RSS fallback
+    return _rss_for_query(query, language, page_size)
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def fetch_headlines(category, page_size=6):
-    if category in ("gaming","movies"):
-        q  = {"gaming":"gaming video games","movies":"movies film cinema"}[category]
-        fd = (datetime.utcnow()-timedelta(days=3)).strftime("%Y-%m-%d")
-        d  = _api(EVERYTHING_EP,{"q":q,"language":"en","sortBy":"publishedAt","pageSize":page_size,"from":fd})
-    else:
-        d = _api(TOP_HEADLINES_EP,{"country":"us","category":category,"pageSize":page_size})
-    return _clean(d.get("articles",[])) if d else []
+    if not _is_limited():
+        if category in ("gaming", "movies"):
+            q  = {"gaming": "gaming video games", "movies": "movies film cinema"}[category]
+            fd = (datetime.utcnow() - timedelta(days=3)).strftime("%Y-%m-%d")
+            data, limited = _api(EVERYTHING_EP, {"q": q, "language": "en",
+                                  "sortBy": "publishedAt", "pageSize": page_size, "from": fd})
+        else:
+            data, limited = _api(TOP_HEADLINES_EP,
+                                  {"country": "us", "category": category, "pageSize": page_size})
+        if limited:
+            _mark_limited()
+        elif data:
+            arts = _clean(data.get("articles", []))
+            if arts: return arts
+
+    # RSS fallback
+    return _rss_for_category(category, page_size)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CARD
@@ -630,6 +824,8 @@ tab_feed, tab_trend, tab_saved = st.tabs(["📰  Feed", "🔥  Trending", "⭐  
 with tab_feed:
     st.markdown(f'<div class="sec-ttl">Latest on &ldquo;{esc(query)}&rdquo;</div>',
                 unsafe_allow_html=True)
+    if _is_limited():
+        _show_fallback_banner()
     with st.spinner("Fetching articles…"):
         articles = fetch_everything(query, sort_by=sort_by, page_size=page_size,
                                     days_back=days_back, language=language, page=feed_page)
@@ -654,6 +850,8 @@ with tab_feed:
 # ── Trending ──────────────────────────────────────────────────────────────────
 with tab_trend:
     st.markdown('<div class="sec-ttl">Top Headlines by Category</div>', unsafe_allow_html=True)
+    if _is_limited():
+        _show_fallback_banner()
     inner = st.tabs([f"{em} {name}" for em,name,_ in TRENDING_TABS])
     for (em,name,key), ctab in zip(TRENDING_TABS, inner):
         with ctab:
@@ -689,3 +887,4 @@ with tab_saved:
                     f'<div class="stat-chip"><strong>Persistent</strong><span>SQLite</span></div>'
                     f'</div>', unsafe_allow_html=True)
         render_grid(saved, cols=3, pfx="sv")
+
