@@ -102,13 +102,13 @@ https://newsapi.org/
 
 ## 📷 Application Preview
 
-```
+
 <img width="1920" height="1080" alt="Screenshot (265)" src="https://github.com/user-attachments/assets/efdff917-10db-407e-8599-86b96c983729" />
 
 <img width="1920" height="1080" alt="Screenshot (266)" src="https://github.com/user-attachments/assets/9643a967-614e-42fb-afc5-4f4ff8e27609" />
 
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/3391a24e-833a-42b1-9ebb-5d7544ea193e" />
-```
+
 
 - Home page
 - News results
@@ -145,6 +145,7 @@ Yuvaraj T
 
 📧 Email: Yuvicardy18@gmail.com  
 🐙 GitHub: https://github.com/YuvarajOfl  
+💼 LinkedIn: https://www.linkedin.com/in/yuvaraj8/
 
 ---
 
