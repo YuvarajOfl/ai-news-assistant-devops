@@ -1,17 +1,3 @@
 # Core application dependencies
 streamlit>=1.32.0
 requests>=2.31.0
-
-# AI / NLP
-anthropic>=0.20.0
-openai>=1.0.0
-
-# Data handling
-pandas>=2.0.0
-numpy>=1.24.0
-
-# News & HTTP
-newsapi-python>=0.2.7
-
-# Utilities
-python-dotenv>=1.0.0
