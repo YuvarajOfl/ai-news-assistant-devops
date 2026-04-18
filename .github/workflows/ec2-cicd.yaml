@@ -21,12 +21,12 @@ jobs:
 
       - name: Copy Project Files
         run: |
-          scp -o StrictHostKeyChecking=no -i key.pem -r app/ ec2-user@35.154.18.177:/home/ec2-user/
-          scp -o StrictHostKeyChecking=no -i key.pem requirements.txt ec2-user@35.154.18.177:/home/ec2-user/
+          scp -o StrictHostKeyChecking=no -i key.pem -r app/ ec2-user@3.89.224.240:/home/ec2-user/
+          scp -o StrictHostKeyChecking=no -i key.pem requirements.txt ec2-user@3.89.224.240:/home/ec2-user/
 
       - name: Deploy on EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ec2-user@35.154.18.177 "
+          ssh -o StrictHostKeyChecking=no -i key.pem ec2-user@3.89.224.240 "
           
           echo '🚀 Starting Deployment...'
 
