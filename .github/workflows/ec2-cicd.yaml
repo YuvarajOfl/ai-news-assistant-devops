@@ -16,7 +16,7 @@ jobs:
 
       - name: Setup SSH Key
         run: |
-          echo "${{ secrets.secretkey }}" > key.pem
+          echo "${{secrets.secretkey}}" > key.pem
           chmod 400 key.pem
 
       - name: Copy Project Files
