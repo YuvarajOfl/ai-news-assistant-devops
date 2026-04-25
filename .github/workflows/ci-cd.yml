@@ -6,7 +6,7 @@ on:
 env:
   IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/ai-news-assistant
   PYTHON_VERSION: "3.11"
-  EC2_HOST: 54.90.201.233
+  EC2_HOST: 15.135.110.223
   EC2_USER: ec2-user
 
 jobs:
