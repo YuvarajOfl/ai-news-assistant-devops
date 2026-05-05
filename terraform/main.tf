@@ -37,7 +37,7 @@ resource "aws_security_group" "ai_sg" {
 resource "aws_instance" "ai_server" {
   ami           = "ami-0c02fb55956c7d316" # Amazon Linux
   instance_type = "t2.micro"
-  key_name      = "your-key-name"
+  key_name      = "Ai-key"
 
   security_groups = [aws_security_group.ai_sg.name]
 
